@@ -1,0 +1,7 @@
+.vscode/sftp.json
+
+# Print job files (created at runtime)
+/jobs/
+
+# Log files
+*.log

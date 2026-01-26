@@ -8,13 +8,8 @@
  *   testprint.php?id=PRINTERID&text=Hello   - Custom text to print
  */
 
-// Directory where print jobs are stored
-define('JOBS_DIR', __DIR__ . '/jobs/');
-
-// Ensure jobs directory exists
-if (!is_dir(JOBS_DIR)) {
-    mkdir(JOBS_DIR, 0755, true);
-}
+// Include queue management
+require_once __DIR__ . '/queue.php';
 
 // Get parameters
 $printerId = preg_replace('/[^A-Za-z0-9_-]/', '', $_GET['id'] ?? '');
@@ -115,19 +110,13 @@ $xml = '<?xml version="1.0" encoding="utf-8"?>
   </ePOSPrint>
 </PrintRequestInfo>';
 
-// Write to job file
-$jobFile = JOBS_DIR . $printerId . '.txt';
-
-// Check if a job already exists
-$existingJob = file_exists($jobFile);
-
-// Write the job file
-$result = file_put_contents($jobFile, $xml, LOCK_EX);
+// Queue the job
+$queueResult = queueJob($printerId, $xml, $jobId);
 
 // Output result
 header('Content-Type: text/html; charset=UTF-8');
 
-if ($result !== false) {
+if ($queueResult['success']) {
     echo '<!DOCTYPE html>
 <html>
 <head>
@@ -136,28 +125,34 @@ if ($result !== false) {
 body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; max-width: 600px; margin: 50px auto; padding: 20px; }
 .success { background: #d4edda; border: 1px solid #c3e6cb; color: #155724; padding: 20px; border-radius: 8px; }
 .warning { background: #fff3cd; border: 1px solid #ffeeba; color: #856404; padding: 10px; border-radius: 8px; margin-top: 15px; }
+.info { background: #cce5ff; border: 1px solid #b8daff; color: #004085; padding: 10px; border-radius: 8px; margin-top: 15px; }
 code { background: #f8f9fa; padding: 2px 6px; border-radius: 4px; }
 pre { background: #f8f9fa; padding: 15px; border-radius: 8px; overflow-x: auto; font-size: 12px; }
 </style>
 </head>
 <body>
 <div class="success">
-<h2>Print Job Created!</h2>
+<h2>Print Job Queued!</h2>
 <p><strong>Printer ID:</strong> <code>' . htmlspecialchars($printerId) . '</code></p>
 <p><strong>Job ID:</strong> <code>' . htmlspecialchars($jobId) . '</code></p>
 <p><strong>Open Drawer:</strong> ' . ($openDrawer ? 'Yes' : 'No') . '</p>
 <p><strong>Timestamp:</strong> ' . htmlspecialchars($timestamp) . '</p>
+<p><strong>Queue Position:</strong> ' . $queueResult['queue_position'] . ' of ' . $queueResult['queue_depth'] . '</p>
 </div>';
 
-    if ($existingJob) {
+    if ($queueResult['discarded']) {
         echo '<div class="warning">
-<strong>Note:</strong> A previous print job was overwritten.
+<strong>Queue Overflow:</strong> An older job was discarded to make room (max queue depth is ' . QUEUE_MAX_DEPTH . ').
 </div>';
     }
 
+    echo '<div class="info">
+<strong>Queue Status:</strong> ' . $queueResult['queue_depth'] . ' job(s) waiting for printer <code>' . htmlspecialchars($printerId) . '</code>
+</div>';
+
     echo '
 <h3>What happens next?</h3>
-<p>The printer will pick up this job on its next poll (within 1-2 seconds if configured properly).</p>
+<p>The printer will pick up jobs from the queue in order (oldest first) on each poll.</p>
 
 <h3>Actions</h3>
 <p>
@@ -179,8 +174,7 @@ pre { background: #f8f9fa; padding: 15px; border-radius: 8px; overflow-x: auto; 
 <head><title>Test Print - Error</title></head>
 <body>
 <h1>Error: Failed to create print job</h1>
-<p>Could not write to job file. Check directory permissions.</p>
-<p>Path: <code>' . htmlspecialchars($jobFile) . '</code></p>
+<p>' . htmlspecialchars($queueResult['error'] ?? 'Unknown error') . '</p>
 </body>
 </html>';
 }

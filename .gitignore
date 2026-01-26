@@ -1,7 +1,11 @@
 .vscode/sftp.json
 
-# Print job files (created at runtime)
+# Print job files and queue directories (created at runtime)
 /jobs/
 
-# Log files
+# API keys directory (sensitive)
+/apikeys/
+
+# Log files and logs directory
+/logs/
 *.log

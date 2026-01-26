@@ -4,18 +4,16 @@
  * 
  * This endpoint is polled by the printer once per second.
  * Optimized for speed - minimal processing, direct file operations.
+ * Uses queue system for managing multiple print jobs per printer.
  */
 
 // Set XML content type immediately
+file_put_contents('debug.txt', json_encode($_REQUEST));
+
 header('Content-Type: text/xml; charset=UTF-8');
 
-// Directory where print jobs are stored
-define('JOBS_DIR', __DIR__ . '/jobs/');
-
-// Ensure jobs directory exists
-if (!is_dir(JOBS_DIR)) {
-    mkdir(JOBS_DIR, 0755, true);
-}
+// Include queue management
+require_once __DIR__ . '/queue.php';
 
 // Only process POST requests
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
@@ -30,37 +28,38 @@ if ($connectionType === 'GetRequest') {
     
     // Get printer ID - sanitize to prevent directory traversal
     $printerId = preg_replace('/[^A-Za-z0-9_-]/', '', $_POST['ID'] ?? '');
+    if (empty($printerId)) {
+        $printerId = preg_replace('/[^A-Za-z0-9_-]/', '', $_POST['Name'] ?? '');
+    }
     
     if (empty($printerId)) {
         exit;
     }
     
-    $jobFile = JOBS_DIR . $printerId . '.txt';
-    $pendingFile = JOBS_DIR . $printerId . '_pending_' . time() . '.txt';
+    // Get next job from queue
+    $job = getNextJob($printerId);
     
-    // Check if job file exists
-    if (file_exists($jobFile)) {
-        // Read and output the job
-        $content = file_get_contents($jobFile);
-        
-        // Immediately rename to prevent duplicate printing
-        // Use atomic rename for race condition safety
-        if (rename($jobFile, $pendingFile)) {
-            echo $content;
+    if ($job !== null) {
+        // Mark job as complete (moves to _pending directory)
+        if (completeJob($job['file'], true)) {
+            echo $job['content'];
         }
     }
-    // If no job file, output nothing (empty response = no job)
+    // If no job in queue, output nothing (empty response = no job)
     
 } elseif ($connectionType === 'SetResponse') {
     // Printer is sending print result
     // Log the response for debugging if needed
     
     $printerId = preg_replace('/[^A-Za-z0-9_-]/', '', $_POST['ID'] ?? '');
+    if (empty($printerId)) {
+        $printerId = preg_replace('/[^A-Za-z0-9_-]/', '', $_POST['Name'] ?? '');
+    }
     $responseXml = $_POST['ResponseFile'] ?? '';
     
     if (!empty($printerId) && !empty($responseXml)) {
         // Parse and log the response
-        $logFile = JOBS_DIR . 'print_results.log';
+        $logFile = QUEUE_BASE_DIR . 'print_results.log';
         $timestamp = date('Y-m-d H:i:s');
         
         try {

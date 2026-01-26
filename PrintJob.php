@@ -17,29 +17,29 @@
  *       ->send();
  */
 
+// Include queue management
+require_once __DIR__ . '/queue.php';
+
 class PrintJob
 {
+    // Image processing constants
+    private const MAX_IMAGE_WIDTH = 576;  // TM-T88VII max print width in dots (80mm paper)
+    private const BRIGHTNESS_THRESHOLD = 127;  // 0-255, pixels darker than this become black
+    
     private string $printerId;
-    private string $jobsDir;
     private array $commands = [];
     private string $jobId;
+    private ?array $lastQueueResult = null;
     
     /**
      * Create a new print job
      * 
      * @param string $printerId The printer ID configured in Server Direct Print
-     * @param string|null $jobsDir Optional custom jobs directory path
      */
-    public function __construct(string $printerId, ?string $jobsDir = null)
+    public function __construct(string $printerId)
     {
         $this->printerId = preg_replace('/[^A-Za-z0-9_-]/', '', $printerId);
-        $this->jobsDir = $jobsDir ?? __DIR__ . '/jobs/';
         $this->jobId = 'JOB_' . time() . '_' . mt_rand(1000, 9999);
-        
-        // Ensure jobs directory exists
-        if (!is_dir($this->jobsDir)) {
-            mkdir($this->jobsDir, 0755, true);
-        }
         
         // Initialize with language setting
         $this->commands[] = '<text lang="en"/>';
@@ -231,6 +231,270 @@ class PrintJob
     }
     
     /**
+     * Add an image to the print job
+     * 
+     * Accepts either:
+     * - A file path to an image (PNG, JPEG, GIF, etc.)
+     * - Base64-encoded image data (with or without data URL prefix)
+     * - Raw binary image data
+     * 
+     * Fails silently if image cannot be processed (no image added, no error).
+     * 
+     * @param string $imageData File path, base64 string, or binary data
+     * @param string $align Image alignment: 'left', 'center', 'right'
+     * @return self
+     */
+    public function image(string $imageData, string $align = 'center'): self
+    {
+        $rasterData = $this->imageToRaster($imageData);
+        
+        if ($rasterData === null) {
+            return $this;  // Fail silently
+        }
+        
+        $alignAttr = in_array($align, ['left', 'center', 'right']) ? $align : 'center';
+        
+        $this->commands[] = sprintf(
+            '<image width="%d" height="%d" color="color_1" mode="mono" align="%s">%s</image>',
+            $rasterData['width'],
+            $rasterData['height'],
+            $alignAttr,
+            $rasterData['raster']
+        );
+        $this->commands[] = '<feed line="1"/>';
+        
+        return $this;
+    }
+    
+    /**
+     * Add an image from a file path
+     * 
+     * Fails silently if file cannot be read or processed (no image added, no error).
+     * 
+     * @param string $filePath Path to image file
+     * @param string $align Image alignment: 'left', 'center', 'right'
+     * @return self
+     */
+    public function imageFromFile(string $filePath, string $align = 'center'): self
+    {
+        if (!file_exists($filePath)) {
+            return $this;  // Fail silently
+        }
+        
+        $imageData = @file_get_contents($filePath);
+        if ($imageData === false) {
+            return $this;  // Fail silently
+        }
+        
+        return $this->image($imageData, $align);
+    }
+    
+    /**
+     * Add an image from base64-encoded data
+     * 
+     * Fails silently if data cannot be decoded or processed (no image added, no error).
+     * 
+     * @param string $base64Data Base64 string (with or without data URL prefix)
+     * @param string $align Image alignment: 'left', 'center', 'right'
+     * @return self
+     */
+    public function imageFromBase64(string $base64Data, string $align = 'center'): self
+    {
+        // Strip data URL prefix if present
+        if (strpos($base64Data, 'data:') === 0) {
+            $commaPos = strpos($base64Data, ',');
+            if ($commaPos !== false) {
+                $base64Data = substr($base64Data, $commaPos + 1);
+            }
+        }
+        
+        $binaryData = @base64_decode($base64Data, true);
+        if ($binaryData === false) {
+            return $this;  // Fail silently
+        }
+        
+        return $this->image($binaryData, $align);
+    }
+    
+    /**
+     * Convert image data to Epson raster format
+     * 
+     * @param string $imageData File path, base64 string, or binary data
+     * @return array|null ['raster' => base64 string, 'width' => int, 'height' => int] or null on failure
+     */
+    private function imageToRaster(string $imageData): ?array
+    {
+        // Detect input type and get binary data
+        $binaryData = $this->getImageBinaryData($imageData);
+        
+        if ($binaryData === null) {
+            return null;
+        }
+        
+        // Create image from binary data
+        $image = @imagecreatefromstring($binaryData);
+        if ($image === false) {
+            return null;
+        }
+        
+        $width = imagesx($image);
+        $height = imagesy($image);
+        
+        // Validate dimensions
+        if ($width <= 0 || $height <= 0) {
+            imagedestroy($image);
+            return null;
+        }
+        
+        // Convert palette images to true color (critical for correct color reading)
+        if (!imageistruecolor($image)) {
+            $trueColorImage = @imagecreatetruecolor($width, $height);
+            if ($trueColorImage === false) {
+                imagedestroy($image);
+                return null;
+            }
+            $white = imagecolorallocate($trueColorImage, 255, 255, 255);
+            imagefill($trueColorImage, 0, 0, $white);
+            imagecopy($trueColorImage, $image, 0, 0, 0, 0, $width, $height);
+            imagedestroy($image);
+            $image = $trueColorImage;
+        }
+        
+        // Scale down if too wide (maintain aspect ratio)
+        if ($width > self::MAX_IMAGE_WIDTH) {
+            $newWidth = self::MAX_IMAGE_WIDTH;
+            $newHeight = (int)round($height * (self::MAX_IMAGE_WIDTH / $width));
+            $resized = @imagecreatetruecolor($newWidth, $newHeight);
+            if ($resized === false) {
+                imagedestroy($image);
+                return null;
+            }
+            
+            $white = imagecolorallocate($resized, 255, 255, 255);
+            imagefill($resized, 0, 0, $white);
+            
+            imagecopyresampled($resized, $image, 0, 0, 0, 0, $newWidth, $newHeight, $width, $height);
+            imagedestroy($image);
+            $image = $resized;
+            $width = $newWidth;
+            $height = $newHeight;
+        }
+        
+        // Pad width to multiple of 8 for byte alignment
+        $paddedWidth = (int)ceil($width / 8) * 8;
+        
+        // Convert to monochrome raster
+        $rasterData = '';
+        
+        for ($y = 0; $y < $height; $y++) {
+            $byte = 0;
+            $bitPosition = 7;  // Start from MSB
+            
+            for ($x = 0; $x < $paddedWidth; $x++) {
+                if ($x < $width) {
+                    $rgb = imagecolorat($image, $x, $y);
+                    $r = ($rgb >> 16) & 0xFF;
+                    $g = ($rgb >> 8) & 0xFF;
+                    $b = $rgb & 0xFF;
+                    
+                    // Convert to grayscale using luminosity method
+                    $gray = (int)(0.299 * $r + 0.587 * $g + 0.114 * $b);
+                    
+                    // Apply threshold: darker than threshold = black (1)
+                    $isBlack = ($gray < self::BRIGHTNESS_THRESHOLD);
+                } else {
+                    // Padding pixels are white (0)
+                    $isBlack = false;
+                }
+                
+                if ($isBlack) {
+                    $byte |= (1 << $bitPosition);
+                }
+                
+                $bitPosition--;
+                
+                if ($bitPosition < 0) {
+                    $rasterData .= chr($byte);
+                    $byte = 0;
+                    $bitPosition = 7;
+                }
+            }
+        }
+        
+        imagedestroy($image);
+        
+        return [
+            'raster' => base64_encode($rasterData),
+            'width' => $paddedWidth,
+            'height' => $height
+        ];
+    }
+    
+    /**
+     * Detect image data type and return binary data
+     * 
+     * @param string $imageData File path, base64 string, or binary data
+     * @return string|null Binary image data or null on failure
+     */
+    private function getImageBinaryData(string $imageData): ?string
+    {
+        // Check if it's a file path
+        if (file_exists($imageData)) {
+            $data = @file_get_contents($imageData);
+            if ($data === false) {
+                return null;
+            }
+            return $data;
+        }
+        
+        // Check if it's a data URL (data:image/png;base64,...)
+        if (strpos($imageData, 'data:') === 0) {
+            $commaPos = strpos($imageData, ',');
+            if ($commaPos !== false) {
+                $base64Data = substr($imageData, $commaPos + 1);
+                $decoded = @base64_decode($base64Data, true);
+                if ($decoded !== false) {
+                    return $decoded;
+                }
+            }
+            return null;
+        }
+        
+        // Check if it looks like base64 (alphanumeric + /+ with optional = padding)
+        // Base64 strings are typically longer and don't contain binary characters
+        if (preg_match('/^[A-Za-z0-9+\/=]+$/', $imageData) && strlen($imageData) > 100) {
+            $decoded = @base64_decode($imageData, true);
+            if ($decoded !== false && strlen($decoded) > 0) {
+                // Verify it looks like image data (check for common magic bytes)
+                $magic = substr($decoded, 0, 8);
+                if (
+                    substr($magic, 0, 8) === "\x89PNG\r\n\x1a\n" ||  // PNG
+                    substr($magic, 0, 2) === "\xff\xd8" ||            // JPEG
+                    substr($magic, 0, 6) === "GIF87a" ||              // GIF87
+                    substr($magic, 0, 6) === "GIF89a" ||              // GIF89
+                    substr($magic, 0, 4) === "RIFF"                   // WEBP
+                ) {
+                    return $decoded;
+                }
+            }
+        }
+        
+        // Check if it's raw binary data (check for image magic bytes)
+        $magic = substr($imageData, 0, 8);
+        if (
+            substr($magic, 0, 8) === "\x89PNG\r\n\x1a\n" ||  // PNG
+            substr($magic, 0, 2) === "\xff\xd8" ||            // JPEG
+            substr($magic, 0, 6) === "GIF87a" ||              // GIF87
+            substr($magic, 0, 6) === "GIF89a" ||              // GIF89
+            substr($magic, 0, 4) === "RIFF"                   // WEBP
+        ) {
+            return $imageData;
+        }
+        
+        return null;
+    }
+    
+    /**
      * Cut paper (partial cut with feed - default)
      */
     public function cut(): self
@@ -323,15 +587,44 @@ class PrintJob
     }
     
     /**
-     * Send the print job (write to file for printer to pick up)
+     * Send the print job (queue for printer to pick up)
      * 
      * @return bool True on success, false on failure
      */
     public function send(): bool
     {
-        $jobFile = $this->jobsDir . $this->printerId . '.txt';
-        $result = file_put_contents($jobFile, $this->toXml(), LOCK_EX);
-        return $result !== false;
+        $this->lastQueueResult = queueJob($this->printerId, $this->toXml(), $this->jobId);
+        return $this->lastQueueResult['success'];
+    }
+    
+    /**
+     * Get the result of the last send() operation
+     * 
+     * @return array|null Queue result or null if send() not called
+     */
+    public function getQueueResult(): ?array
+    {
+        return $this->lastQueueResult;
+    }
+    
+    /**
+     * Get queue position after sending
+     * 
+     * @return int|null Queue position or null if not sent
+     */
+    public function getQueuePosition(): ?int
+    {
+        return $this->lastQueueResult['queue_position'] ?? null;
+    }
+    
+    /**
+     * Check if an older job was discarded due to queue overflow
+     * 
+     * @return bool
+     */
+    public function wasJobDiscarded(): bool
+    {
+        return $this->lastQueueResult['discarded'] ?? false;
     }
     
     /**

@@ -142,7 +142,7 @@ pre { background: #f8f9fa; padding: 15px; border-radius: 8px; overflow-x: auto; 
 
     if ($queueResult['discarded']) {
         echo '<div class="warning">
-<strong>Queue Overflow:</strong> An older job was discarded to make room (max queue depth is ' . QUEUE_MAX_DEPTH . ').
+<strong>Queue Overflow:</strong> An older job (<code>' . htmlspecialchars($queueResult['discarded_job_id'] ?? 'unknown') . '</code>) was discarded to make room (max queue depth is ' . QUEUE_MAX_DEPTH . ').
 </div>';
     }
 

@@ -3,33 +3,31 @@
  * Epson TM-T88VII Server Direct Print Endpoint
  * 
  * This endpoint is polled by the printer once per second.
- * Optimized for speed - minimal processing, direct file operations.
- * Uses queue system for managing multiple print jobs per printer.
+ * Optimized for speed - minimal processing, database-backed queue.
  */
 
 // Set XML content type immediately
-file_put_contents('debug.txt', json_encode($_REQUEST));
-
 header('Content-Type: text/xml; charset=UTF-8');
+file_put_contents('debug.txt', print_r($_REQUEST, true));
 
-// Include queue management
+// Include queue management (which includes dbconnection.php)
 require_once __DIR__ . '/queue.php';
 
 // Only process POST requests
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-    exit;
+    //exit;
 }
 
 // Get connection type
-$connectionType = $_POST['ConnectionType'] ?? '';
-
+$connectionType = $_REQUEST['ConnectionType'] ?? '';
+file_put_contents('debug5.txt', $connectionType);
 if ($connectionType === 'GetRequest') {
     // Printer is polling for print jobs
     
-    // Get printer ID - sanitize to prevent directory traversal
-    $printerId = preg_replace('/[^A-Za-z0-9_-]/', '', $_POST['ID'] ?? '');
+    // Get printer ID - sanitize to prevent injection
+    $printerId = preg_replace('/[^A-Za-z0-9_-]/', '', $_REQUEST['ID'] ?? '');
     if (empty($printerId)) {
-        $printerId = preg_replace('/[^A-Za-z0-9_-]/', '', $_POST['Name'] ?? '');
+        $printerId = preg_replace('/[^A-Za-z0-9_-]/', '', $_REQUEST['Name'] ?? '');
     }
     
     if (empty($printerId)) {
@@ -40,55 +38,55 @@ if ($connectionType === 'GetRequest') {
     $job = getNextJob($printerId);
     
     if ($job !== null) {
-        // Mark job as complete (moves to _pending directory)
-        if (completeJob($job['file'], true)) {
-            echo $job['content'];
-        }
+        // Output the job content
+        echo $job['content'];
+        file_put_contents('debug3.txt', $job['content']);
+        
+        // Mark job as complete (it's been sent to printer)
+        completeJob($job['id'], true);
+        file_put_contents('debug4.txt', "Job completed");
     }
     // If no job in queue, output nothing (empty response = no job)
     
 } elseif ($connectionType === 'SetResponse') {
     // Printer is sending print result
-    // Log the response for debugging if needed
     
-    $printerId = preg_replace('/[^A-Za-z0-9_-]/', '', $_POST['ID'] ?? '');
+    $printerId = preg_replace('/[^A-Za-z0-9_-]/', '', $_REQUEST['ID'] ?? '');
     if (empty($printerId)) {
-        $printerId = preg_replace('/[^A-Za-z0-9_-]/', '', $_POST['Name'] ?? '');
+        $printerId = preg_replace('/[^A-Za-z0-9_-]/', '', $_REQUEST['Name'] ?? '');
     }
-    $responseXml = $_POST['ResponseFile'] ?? '';
+    $responseXml = $_REQUEST['ResponseFile'] ?? '';
     
     if (!empty($printerId) && !empty($responseXml)) {
         // Parse and log the response
-        $logFile = QUEUE_BASE_DIR . 'print_results.log';
-        $timestamp = date('Y-m-d H:i:s');
-        
         try {
             $xml = @simplexml_load_string($responseXml);
             if ($xml) {
                 $version = (string)($xml['Version'] ?? '1.00');
-                $logEntry = "[$timestamp] Printer: $printerId, Version: $version\n";
                 
                 // Handle different response versions
                 if ($version === '1.00') {
                     foreach ($xml->response as $response) {
-                        $success = (string)$response['success'];
+                        $success = ((string)$response['success']) === 'true';
                         $code = (string)$response['code'];
-                        $logEntry .= "  Result: success=$success, code=$code\n";
+                        $status = isset($response['status']) ? (int)$response['status'] : null;
+                        
+                        logPrintResult($printerId, null, $success, $code, $status, $version, $responseXml);
                     }
                 } elseif ($version >= '2.00') {
                     foreach ($xml->ePOSPrint as $eposprint) {
-                        $devid = (string)($eposprint->Parameter->devid ?? '');
-                        $jobid = (string)($eposprint->Parameter->printjobid ?? '');
+                        $jobId = (string)($eposprint->Parameter->printjobid ?? '');
                         $response = $eposprint->PrintResponse->response ?? null;
+                        
                         if ($response) {
-                            $success = (string)$response['success'];
+                            $success = ((string)$response['success']) === 'true';
                             $code = (string)$response['code'];
-                            $logEntry .= "  Device: $devid, Job: $jobid, success=$success, code=$code\n";
+                            $status = isset($response['status']) ? (int)$response['status'] : null;
+                            
+                            logPrintResult($printerId, $jobId, $success, $code, $status, $version, $responseXml);
                         }
                     }
                 }
-                
-                file_put_contents($logFile, $logEntry, FILE_APPEND | LOCK_EX);
             }
         } catch (Exception $e) {
             // Silently ignore parsing errors to keep response fast

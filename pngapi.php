@@ -16,21 +16,17 @@
 // Fast failure - set JSON header immediately
 header('Content-Type: application/json; charset=UTF-8');
 
-// Include queue management
+// Include queue management and API authentication
 require_once __DIR__ . '/queue.php';
+require_once __DIR__ . '/apiauth.php';
 
 // Configuration
-define('APIKEYS_DIR', __DIR__ . '/apikeys/');
 define('LOGS_DIR', __DIR__ . '/logs/');
-define('MIN_APIKEY_LENGTH', 16);
 define('MAX_IMAGE_WIDTH', 576);  // TM-T88VII max print width in dots (80mm paper)
 define('BRIGHTNESS_THRESHOLD', 127);  // 0-255, pixels darker than this become black
 define('DEBUG_MODE', true);  // Set to true to enable debug logging
 
-// Ensure directories exist
-if (!is_dir(APIKEYS_DIR)) {
-    mkdir(APIKEYS_DIR, 0755, true);
-}
+// Ensure log directory exists
 if (DEBUG_MODE && !is_dir(LOGS_DIR)) {
     mkdir(LOGS_DIR, 0755, true);
 }
@@ -66,28 +62,6 @@ function respond(bool $success, string $message, array $extra = []): void
         'message' => $message
     ], $extra), JSON_UNESCAPED_SLASHES);
     exit;
-}
-
-/**
- * Validate API key
- * - Must be at least 16 characters
- * - Must have a corresponding file in apikeys directory
- */
-function validateApiKey(string $key): bool
-{
-    // Quick length check first (fast fail)
-    if (strlen($key) < MIN_APIKEY_LENGTH) {
-        return false;
-    }
-    
-    // Sanitize to prevent directory traversal
-    $safeKey = preg_replace('/[^A-Za-z0-9_-]/', '', $key);
-    if ($safeKey !== $key) {
-        return false;  // Key contained invalid characters
-    }
-    
-    // Check if key file exists
-    return file_exists(APIKEYS_DIR . $safeKey . '.txt');
 }
 
 /**
@@ -399,7 +373,7 @@ $response = [
 
 if ($queueResult['discarded']) {
     $response['queue_overflow'] = true;
-    $response['discarded_job'] = $queueResult['discarded_file'];
+    $response['discarded_job'] = $queueResult['discarded_job_id'];
 }
 
 if ($imageData !== null) {

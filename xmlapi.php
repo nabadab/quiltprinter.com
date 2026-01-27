@@ -16,17 +16,9 @@
 // Fast failure - set JSON header immediately
 header('Content-Type: application/json; charset=UTF-8');
 
-// Include queue management
+// Include queue management and API authentication
 require_once __DIR__ . '/queue.php';
-
-// Configuration
-define('APIKEYS_DIR', __DIR__ . '/apikeys/');
-define('MIN_APIKEY_LENGTH', 16);
-
-// Ensure directories exist
-if (!is_dir(APIKEYS_DIR)) {
-    mkdir(APIKEYS_DIR, 0755, true);
-}
+require_once __DIR__ . '/apiauth.php';
 
 /**
  * Send JSON response and exit
@@ -38,28 +30,6 @@ function respond(bool $success, string $message, array $extra = []): void
         'message' => $message
     ], $extra), JSON_UNESCAPED_SLASHES);
     exit;
-}
-
-/**
- * Validate API key
- * - Must be at least 16 characters
- * - Must have a corresponding file in apikeys directory
- */
-function validateApiKey(string $key): bool
-{
-    // Quick length check first (fast fail)
-    if (strlen($key) < MIN_APIKEY_LENGTH) {
-        return false;
-    }
-    
-    // Sanitize to prevent directory traversal
-    $safeKey = preg_replace('/[^A-Za-z0-9_-]/', '', $key);
-    if ($safeKey !== $key) {
-        return false;  // Key contained invalid characters
-    }
-    
-    // Check if key file exists
-    return file_exists(APIKEYS_DIR . $safeKey . '.txt');
 }
 
 // =============================================================================
@@ -138,7 +108,7 @@ $response = [
 
 if ($queueResult['discarded']) {
     $response['queue_overflow'] = true;
-    $response['discarded_job'] = $queueResult['discarded_file'];
+    $response['discarded_job'] = $queueResult['discarded_job_id'];
 }
 
 respond(true, 'Print job queued', $response);

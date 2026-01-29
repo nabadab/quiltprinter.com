@@ -73,10 +73,16 @@ function handleStarCloudPRNT(string $printerId, ?array $jsonBody): void
             $job = peekNextJob($printerId);
             
             if ($job !== null) {
+                // Determine media types based on job content
+                $mediaTypes = ['text/plain'];  // Default
+                if (strpos($job['content'], '[STAR:PNG') === 0) {
+                    $mediaTypes = ['image/png'];
+                }
+                
                 // Job available - tell printer to fetch it
                 echo json_encode([
                     'jobReady' => true,
-                    'mediaTypes' => ['text/plain'],
+                    'mediaTypes' => $mediaTypes,
                     'jobToken' => (string)$job['id']
                 ]);
             } else {
@@ -97,19 +103,34 @@ function handleStarCloudPRNT(string $printerId, ?array $jsonBody): void
             }
             
             if ($job !== null) {
-                // Return the job content as plain text
-                header('Content-Type: text/plain; charset=UTF-8');
-                header('X-Star-Cut: partial; feed=true');
-                
-                // Extract plain text and check for special options
-                $result = extractPlainTextFromJob($job['content']);
-                
-                // Handle cash drawer if requested
-                if ($result['openDrawer']) {
-                    header('X-Star-CashDrawer: end');
+                // Check if this is a PNG job
+                if (strpos($job['content'], '[STAR:PNG') === 0) {
+                    // PNG job - extract and serve binary PNG
+                    $pngResult = extractStarPngJob($job['content']);
+                    
+                    header('Content-Type: image/png');
+                    header('X-Star-Cut: partial; feed=true');
+                    
+                    if ($pngResult['openDrawer']) {
+                        header('X-Star-CashDrawer: end');
+                    }
+                    
+                    echo $pngResult['data'];
+                } else {
+                    // Text job
+                    header('Content-Type: text/plain; charset=UTF-8');
+                    header('X-Star-Cut: partial; feed=true');
+                    
+                    // Extract plain text and check for special options
+                    $result = extractPlainTextFromJob($job['content']);
+                    
+                    // Handle cash drawer if requested
+                    if ($result['openDrawer']) {
+                        header('X-Star-CashDrawer: end');
+                    }
+                    
+                    echo $result['text'];
                 }
-                
-                echo $result['text'];
             } else {
                 // No job found
                 http_response_code(404);
@@ -219,7 +240,7 @@ function getJobById(int $jobId, string $printerId): ?array
 
 /**
  * Extract plain text content from job format
- * Handles: Star JSON format, Epson ePOS XML, or plain text
+ * Handles: Star text format (with markers), Epson ePOS XML, or plain text
  * 
  * @return array ['text' => string, 'openDrawer' => bool]
  */
@@ -227,23 +248,20 @@ function extractPlainTextFromJob(string $content): array
 {
     $openDrawer = false;
     
-    // First, try to parse as JSON (Star format with metadata)
-    $json = @json_decode($content, true);
-    if ($json !== null && isset($json['type']) && $json['type'] === 'star') {
-        return [
-            'text' => trim($json['text'] ?? '') . "\n",
-            'openDrawer' => $json['openDrawer'] ?? false
-        ];
+    // Check for Star drawer marker at the start
+    if (strpos($content, "[STAR:DRAWER]\n") === 0) {
+        $openDrawer = true;
+        $content = substr($content, strlen("[STAR:DRAWER]\n"));
     }
     
     // Try to parse as XML (Epson ePOS format)
     $xml = @simplexml_load_string($content);
     
     if ($xml === false) {
-        // Not XML or JSON, return as-is (plain text)
+        // Not XML, return as-is (plain text for Star printers)
         return [
             'text' => $content,
-            'openDrawer' => false
+            'openDrawer' => $openDrawer
         ];
     }
     
@@ -268,6 +286,42 @@ function extractPlainTextFromJob(string $content): array
     
     return [
         'text' => trim($text) . "\n",
+        'openDrawer' => $openDrawer
+    ];
+}
+
+/**
+ * Extract PNG data from Star PNG job format
+ * Format: [STAR:PNG] or [STAR:PNG:DRAWER] on first line, then base64 PNG data
+ * 
+ * @return array ['data' => binary PNG, 'openDrawer' => bool]
+ */
+function extractStarPngJob(string $content): array
+{
+    $openDrawer = false;
+    
+    // Check for PNG with drawer marker
+    if (strpos($content, "[STAR:PNG:DRAWER]\n") === 0) {
+        $openDrawer = true;
+        $base64Data = substr($content, strlen("[STAR:PNG:DRAWER]\n"));
+    } elseif (strpos($content, "[STAR:PNG]\n") === 0) {
+        $base64Data = substr($content, strlen("[STAR:PNG]\n"));
+    } else {
+        // Unknown format, return empty
+        return [
+            'data' => '',
+            'openDrawer' => false
+        ];
+    }
+    
+    // Decode base64 to get raw PNG binary
+    $pngData = base64_decode($base64Data, true);
+    if ($pngData === false) {
+        $pngData = '';
+    }
+    
+    return [
+        'data' => $pngData,
         'openDrawer' => $openDrawer
     ];
 }

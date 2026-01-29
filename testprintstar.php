@@ -83,20 +83,12 @@ $lines[] = '';
 // Join lines with newlines
 $printContent = implode("\n", $lines);
 
-// Store metadata in a JSON wrapper so we can extract it during GET
-// The actual content sent to printer will be extracted by extractPlainTextFromJob
-// But for Star, we'll store it as plain text directly
+// For Star jobs, store plain text with optional drawer marker
 $jobContent = $printContent;
 
-// If opening drawer, we'll note it in the job metadata
-// The X-Star-CashDrawer header is set during GET response
+// If opening drawer, prepend a marker that we'll detect and strip during GET
 if ($openDrawer) {
-    // Store as JSON with metadata for drawer control
-    $jobContent = json_encode([
-        'type' => 'star',
-        'text' => $printContent,
-        'openDrawer' => true
-    ]);
+    $jobContent = "[STAR:DRAWER]\n" . $printContent;
 }
 
 // Queue the job

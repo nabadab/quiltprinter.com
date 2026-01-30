@@ -1,0 +1,8 @@
+{
+  "recommendations": [
+    "GitHub.copilot",
+    "GitHub.copilot-chat",
+    "bmewburn.vscode-intelephense-client",
+    "xdebug.php-debug"
+  ]
+}

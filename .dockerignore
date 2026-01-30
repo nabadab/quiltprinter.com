@@ -1,0 +1,10 @@
+.git
+.gitignore
+.vscode
+.env
+.env.*
+logs
+*.log
+config_live.php
+node_modules
+vendor

@@ -1,0 +1,94 @@
+{
+    "timestamp": "2026-02-17 21:15:09",
+    "request_method": "GET",
+    "content_type": null,
+    "pid": null,
+    "raw_body": "",
+    "json_body": null,
+    "all_headers": {
+        "HOST": "localhost:8080",
+        "USER_AGENT": "curl\/8.7.1",
+        "ACCEPT": "*\/*"
+    },
+    "request": []
+}
+{
+    "timestamp": "2026-02-17 21:15:25",
+    "request_method": "GET",
+    "content_type": null,
+    "pid": "test-printer-01",
+    "raw_body": "",
+    "json_body": null,
+    "all_headers": {
+        "HOST": "localhost:8080",
+        "USER_AGENT": "curl\/8.7.1",
+        "ACCEPT": "*\/*"
+    },
+    "request": {
+        "pid": "test-printer-01"
+    }
+}
+{
+    "timestamp": "2026-02-17 21:19:38",
+    "request_method": "GET",
+    "content_type": null,
+    "pid": "test-printer-01",
+    "raw_body": "",
+    "json_body": null,
+    "all_headers": {
+        "HOST": "localhost:8080",
+        "USER_AGENT": "curl\/8.7.1",
+        "ACCEPT": "*\/*"
+    },
+    "request": {
+        "pid": "test-printer-01"
+    }
+}
+{
+    "timestamp": "2026-02-17 21:28:04",
+    "request_method": "GET",
+    "content_type": null,
+    "pid": "test-printer-01",
+    "raw_body": "",
+    "json_body": null,
+    "all_headers": {
+        "HOST": "localhost:8080",
+        "USER_AGENT": "curl\/8.7.1",
+        "ACCEPT": "*\/*"
+    },
+    "request": {
+        "pid": "test-printer-01"
+    }
+}
+{
+    "timestamp": "2026-02-17 21:36:49",
+    "request_method": "HEAD",
+    "content_type": null,
+    "pid": "test-printer-02",
+    "raw_body": "",
+    "json_body": null,
+    "all_headers": {
+        "HOST": "localhost:8080",
+        "USER_AGENT": "curl\/8.7.1",
+        "ACCEPT": "*\/*"
+    },
+    "request": {
+        "pid": "test-printer-02"
+    }
+}
+{
+    "timestamp": "2026-02-17 21:36:56",
+    "request_method": "GET",
+    "content_type": null,
+    "pid": "test-printer-02",
+    "raw_body": "",
+    "json_body": null,
+    "all_headers": {
+        "HOST": "localhost:8080",
+        "USER_AGENT": "curl\/8.7.1",
+        "ACCEPT": "*\/*"
+    },
+    "request": {
+        "pid": "test-printer-02"
+    }
+}

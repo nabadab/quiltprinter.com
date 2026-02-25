@@ -74,10 +74,17 @@ function handleStarCloudPRNT(string $printerId, ?array $jsonBody): void
             
             if ($job !== null) {
                 // Determine media types based on job content
-                $mediaTypes = ['text/plain'];  // Default
-                if (strpos($job['content'], '[STAR:PNG') === 0) {
+                $content = $job['content'];
+                $mediaTypes = ['text/plain'];  // Default (also used for drawer-only)
+                
+                if (strpos($content, '[STAR:PNG]') === 0 || strpos($content, '[STAR:PNG:DRAWER]') === 0) {
                     $mediaTypes = ['image/png'];
+                } elseif (strpos($content, '[STAR:MARKUP]') === 0 || strpos($content, '[STAR:MARKUP:DRAWER]') === 0) {
+                    // Star Document Markup gets converted to plain text
+                    // (Native markup requires CPUtil which we don't have)
+                    $mediaTypes = ['text/plain'];
                 }
+                // drawer-only uses text/plain (default) to ensure headers are processed
                 
                 // Job available - tell printer to fetch it
                 echo json_encode([
@@ -103,26 +110,70 @@ function handleStarCloudPRNT(string $printerId, ?array $jsonBody): void
             }
             
             if ($job !== null) {
-                // Check if this is a PNG job
-                if (strpos($job['content'], '[STAR:PNG') === 0) {
-                    // PNG job - extract and serve binary PNG
-                    $pngResult = extractStarPngJob($job['content']);
+                $content = $job['content'];
+                
+                // Check for drawer-only job (no printing, just open drawer)
+                if ($content === '[STAR:DRAWER_ONLY]') {
+                    // Send empty response with drawer command headers
+                    // Content-Length: 0 means nothing to print
+                    // X-Star-Cut: none prevents any cut/feed
+                    // X-Star-CashDrawer: start triggers drawer immediately
+                    header('Content-Type: text/plain');
+                    header('Content-Length: 0');
+                    header('X-Star-Cut: none');
+                    header('X-Star-CashDrawer: start');
+                    // No echo - truly empty body
+                }
+                // Check if this is a PNG job (check DRAWER variant first since it's longer)
+                elseif (strpos($content, '[STAR:PNG:DRAWER]') === 0) {
+                    // PNG job with drawer
+                    $pngResult = extractStarPngJob($content);
+                    
+                    header('Content-Type: image/png');
+                    header('X-Star-Cut: partial; feed=true');
+                    header('X-Star-CashDrawer: end');
+                    
+                    echo $pngResult['data'];
+                }
+                elseif (strpos($content, '[STAR:PNG]') === 0) {
+                    // PNG job without drawer
+                    $pngResult = extractStarPngJob($content);
                     
                     header('Content-Type: image/png');
                     header('X-Star-Cut: partial; feed=true');
                     
-                    if ($pngResult['openDrawer']) {
-                        header('X-Star-CashDrawer: end');
-                    }
-                    
                     echo $pngResult['data'];
+                }
+                // Check if this is a Star Document Markup job
+                // Note: Star Document Markup requires CPUtil to convert to printer commands
+                // Since we don't have CPUtil, we convert markup to plain text
+                elseif (strpos($content, '[STAR:MARKUP:DRAWER]') === 0) {
+                    // Markup job with drawer
+                    $markupContent = substr($content, strlen("[STAR:MARKUP:DRAWER]\n"));
+                    $plainText = convertMarkupToPlainText($markupContent);
+                    
+                    header('Content-Type: text/plain; charset=UTF-8');
+                    header('X-Star-Cut: partial; feed=true');
+                    header('X-Star-CashDrawer: end');
+                    
+                    echo $plainText;
+                }
+                elseif (strpos($content, '[STAR:MARKUP]') === 0) {
+                    // Markup job without drawer
+                    $markupContent = substr($content, strlen("[STAR:MARKUP]\n"));
+                    $plainText = convertMarkupToPlainText($markupContent);
+                    
+                    header('Content-Type: text/plain; charset=UTF-8');
+                    header('X-Star-Cut: partial; feed=true');
+                    
+                    echo $plainText;
                 } else {
-                    // Text job
+                    // Plain text job
                     header('Content-Type: text/plain; charset=UTF-8');
                     header('X-Star-Cut: partial; feed=true');
                     
                     // Extract plain text and check for special options
-                    $result = extractPlainTextFromJob($job['content']);
+                    $result = extractPlainTextFromJob($content);
                     
                     // Handle cash drawer if requested
                     if ($result['openDrawer']) {
@@ -324,6 +375,59 @@ function extractStarPngJob(string $content): array
         'data' => $pngData,
         'openDrawer' => $openDrawer
     ];
+}
+
+/**
+ * Convert Star Document Markup to plain text
+ * 
+ * Since Star Document Markup requires CPUtil for native processing,
+ * we strip the markup tags and convert to plain text format.
+ * 
+ * @param string $markup Star Document Markup content
+ * @return string Plain text content
+ */
+function convertMarkupToPlainText(string $markup): string
+{
+    // Remove cut commands (we handle cut via header)
+    $text = preg_replace('/\[cut:[^\]]*\]/', '', $markup);
+    
+    // Remove formatting commands that don't translate to plain text
+    $text = preg_replace('/\[magnify[^\]]*\]/', '', $text);
+    $text = preg_replace('/\[bold:\s*(on|off)\]/', '', $text);
+    $text = preg_replace('/\[underline:\s*(on|off)\]/', '', $text);
+    $text = preg_replace('/\[invert:\s*(on|off)\]/', '', $text);
+    $text = preg_replace('/\[align:\s*(left|center|centre|right)\]/', '', $text);
+    $text = preg_replace('/\[font:[^\]]*\]/', '', $text);
+    
+    // Handle barcode - convert to text representation
+    $text = preg_replace_callback('/\[barcode:[^\]]*data\s+([^;\]]+)[^\]]*\]/', function($m) {
+        return '[BARCODE: ' . trim($m[1]) . ']';
+    }, $text);
+    
+    // Handle QR code - convert to text representation
+    $text = preg_replace_callback('/\[qrcode:[^\]]*data\s+([^;\]]+)[^\]]*\]/', function($m) {
+        return '[QR: ' . trim($m[1]) . ']';
+    }, $text);
+    
+    // Handle PDF417 - convert to text representation
+    $text = preg_replace_callback('/\[pdf417:[^\]]*data\s+([^;\]]+)[^\]]*\]/', function($m) {
+        return '[PDF417: ' . trim($m[1]) . ']';
+    }, $text);
+    
+    // Remove image tags (can't render in plain text)
+    $text = preg_replace('/\[image:[^\]]*\]/', '[IMAGE]', $text);
+    
+    // Remove any remaining markup tags
+    $text = preg_replace('/\[[a-z]+:[^\]]*\]/i', '', $text);
+    $text = preg_replace('/\[[a-z]+\]/i', '', $text);
+    
+    // Clean up multiple blank lines
+    $text = preg_replace('/\n{3,}/', "\n\n", $text);
+    
+    // Trim whitespace
+    $text = trim($text);
+    
+    return $text . "\n";
 }
 
 // ========================================

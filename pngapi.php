@@ -49,7 +49,6 @@ function debugLog(string $message, $data = null): void
     }
     $logEntry .= "\n";
     
-    file_put_contents(LOGS_DIR . 'pngapi_debug.log', $logEntry, FILE_APPEND | LOCK_EX);
 }
 
 /**

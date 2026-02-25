@@ -134,6 +134,9 @@ if (!empty($pngBase64)) {
         }
     }
     
+    // Remove any whitespace (newlines, spaces) that might be in the base64 string
+    $pngBase64 = preg_replace('/\s+/', '', $pngBase64);
+    
     // Decode base64
     $pngBinary = base64_decode($pngBase64, true);
     if ($pngBinary === false) {
@@ -159,8 +162,8 @@ $jobId = 'STAR_PNG_' . time() . '_' . mt_rand(1000, 9999);
 if ($pngBinary !== null) {
     $jobContent = buildStarPngJob($pngBinary, $openDrawer);
 } else {
-    // Just drawer command, no image
-    $jobContent = $openDrawer ? "[STAR:DRAWER]\n" : "";
+    // Just drawer command, no image - use special marker
+    $jobContent = $openDrawer ? "[STAR:DRAWER_ONLY]" : "";
 }
 
 // Queue the job

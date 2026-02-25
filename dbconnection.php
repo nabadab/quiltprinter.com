@@ -21,23 +21,34 @@
  * ============================================================================
  */
 
-// Load configuration
+// Load configuration (config_live.php is optional if env vars are present)
 $configFile = __DIR__ . '/config_live.php';
-if (!file_exists($configFile)) {
-    throw new RuntimeException(
-        "Configuration file not found: config_live.php\n" .
-        "Please create this file with your database credentials.\n" .
-        "See dbconnection.php for required variables."
-    );
+if (file_exists($configFile)) {
+    require_once $configFile;
 }
 
-require_once $configFile;
+/**
+ * Read environment variables with default
+ */
+function envOrDefault(string $key, $default = null)
+{
+    $value = getenv($key);
+    return ($value === false || $value === '') ? $default : $value;
+}
+
+// Populate from environment if not already set by config_live.php
+$db_host = $db_host ?? envOrDefault('DB_HOST');
+$db_name = $db_name ?? envOrDefault('DB_NAME');
+$db_user = $db_user ?? envOrDefault('DB_USER');
+$db_pass = $db_pass ?? envOrDefault('DB_PASS');
+$db_port = $db_port ?? envOrDefault('DB_PORT');
+$db_charset = $db_charset ?? envOrDefault('DB_CHARSET');
 
 // Validate required variables
-if (!isset($db_host) || !isset($db_name) || !isset($db_user) || !isset($db_pass)) {
+if (!$db_host || !$db_name || !$db_user || $db_pass === null) {
     throw new RuntimeException(
-        "Missing required database configuration variables.\n" .
-        "Required: \$db_host, \$db_name, \$db_user, \$db_pass"
+        "Missing required database configuration.\n" .
+        "Provide config_live.php or set env vars: DB_HOST, DB_NAME, DB_USER, DB_PASS"
     );
 }
 

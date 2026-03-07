@@ -30,7 +30,7 @@ $debugData = [
     'all_headers' => $allHeaders,
     'request' => $_REQUEST,
 ];
-file_put_contents('debug.txt', json_encode($debugData, JSON_PRETTY_PRINT) . "\n", FILE_APPEND);
+//file_put_contents('debug.txt', json_encode($debugData, JSON_PRETTY_PRINT) . "\n", FILE_APPEND);
 
 // Check if this is a Star CloudPRNT request (has pid query parameter)
 $starPrinterId = isset($_GET['pid']) ? preg_replace('/[^A-Za-z0-9_-]/', '', $_GET['pid']) : null;

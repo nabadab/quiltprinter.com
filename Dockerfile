@@ -14,6 +14,6 @@ WORKDIR /var/www/html
 COPY . /var/www/html
 
 RUN mkdir -p /var/www/html/logs \
-    && chown -R www-data:www-data /var/www/html/logs
+    && chown -R www-data:www-data /var/www/html
 
 EXPOSE 80

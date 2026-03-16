@@ -177,5 +177,3 @@ docker compose down -v
 
 - Once local testing is successful, follow `docs/DEPLOYMENT_PLAN.md` to prepare production-ready images and the AWS deployment steps.
 - Consider adding a local `README.local.md` with shortcuts or helper scripts for common dev tasks.
-
-If you'd like, I can also add a small helper script `scripts/local-up.sh` which runs the common commands and health checks.
